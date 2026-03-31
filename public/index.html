@@ -124,7 +124,7 @@
       recipes = await (await fetch('/api/recipes')).json();
       document.getElementById('recipes').innerHTML = `
         <h2>Мои Рецепты</h2>
-        <button class="btn" onclick="addRecipe()ЯДобавить рецепт</button>
+        <button class="btn" onclick="addRecipe(">ЯДобавить рецепт</button>
         ${recipes.map(r => `<div class="recipe-card"><h3>${r.title}</h3><p>${r.description}</p></div>`).join('')}
       `;
     }
@@ -148,7 +148,7 @@
       shopping = await (await fetch('/api/shopping')).json();
       document.getElementById('shopping').innerHTML = `
         <h2>Список покупок</h2>
-        <button class="btn" onclick="addShoppingItem()ЯДобавить</button>
+        <button class="btn" onclick="addShoppingItem(">ЯДобавить</button>
         ${shopping.map(item => `
           <div class="shopping-item ${item.checked ? 'checked' : ''}">
             <input type="checkbox" ${item.checked ? 'checked' : ''} onchange="toggleItem(${item.id})">
