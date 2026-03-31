@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Семейное Меню</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f5f5f5; }
+    .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+    header { background: #4CAF50; color: white; padding: 20px; text-align: center; }
+    h1 { margin-bottom: 10px; }
+    nav { display: flex; justify-content: center; gap: 15px; margin-top: 15px; }
+    nav button { background: white; color: #4CAF50; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; font-weight: bold; }
+    nav button:hover { background: #f1f1f1; }
+    .section { background: white; padding: 30px; margin: 20px 0; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: none; }
+    .section.active { display: block; }
+    .btn { background: #4CAF50; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; }
+    .btn:hover { background: #45a049; }
+    input, textarea, select { width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ddd; border-radius: 4px; }
+    .recipe-card, .menu-day { background: #f9f9f9; padding: 15px; margin: 10px 0; border-radius: 5px; }
+    .auth-form { max-width: 400px; margin: 50px auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+    .shopping-item { display: flex; align-items: center; gap: 10px; padding: 10px; background: #f9f9f9; margin: 5px 0; border-radius: 4px; }
+    .shopping-item.checked { text-decoration: line-through; opacity: 0.6; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <script>
+    let user = null;
+    let recipes = [];
+    let menu = [];
+    let shopping = [];
+
+    async function init() {
+      try {
+        const res = await fetch('/api/me');
+        if (res.ok) {
+          user = await res.json();
+          showDashboard();
+        } else {
+          showAuth();
+        }
+      } catch (e) {
+        showAuth();
+      }
+    }
+
+    function showAuth() {
+      document.getElementById('app').innerHTML = `
+        <div class="auth-form">
+          <h2>Вход / Регистрация</h2>
+          <input type="text" id="username" placeholder="Логин">
+          <input type="password" id="password" placeholder="Пароль">
+          <input type="text" id="name" placeholder="Ваше имя (необязательно)">
+          <button class="btn" onclick="login()ЯйЗА</button>
+          <button class="btn" onclick="register()ЯЗарегистрироваться</button>
+        </div>
+      `;
+    }
+
+    async function login() {
+      const username = document.getElementById('username').value;
+      const password = document.getElementById('password').value;
+      const res = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+      if (res.ok) {
+        user = (await res.json()).user;
+        showDashboard();
+      } else {
+        alert('Ошибка входа');
+      }
+    }
+
+    async function register() {
+      const username = document.getElementById('username').value;
+      const password = document.getElementById('password').value;
+      const name = document.getElementById('name').value;
+      const res = await fetch('/api/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password, name })
+      });
+      if (res.ok) {
+        user = (await res.json()).user;
+        showDashboard();
+      } else {
+        alert('Ошибка регистрации');
+      }
+    }
+
+    function showDashboard() {
+      document.getElementById('app').innerHTML = `
+        <header>
+          <h1>🍽️ Семейное Меню</h1>
+          <p>Привет, ${user.name}!</p>
+          <nav>
+            <button onclick="showSection('recipes')ЯРецепты</button>
+            <button onclick="showSection('menu')ЯМеню на неделю</button>
+            <button onclick="showSection('shopping')ЯСписок покупок</button>
+            <button onclick="logout()ЯВыход</button>
+          </nav>
+        </header>
+        <div class="container">
+          <div id="recipes" class="section"></div>
+          <div id="menu" class="section"></div>
+          <div id="shopping" class="section"></div>
+        </div>
+      `;
+      showSection('recipes');
+    }
+
+    async function showSection(name) {
+      document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+      document.getElementById(name).classList.add('active');
+      if (name === 'recipes') await loadRecipes();
+      if (name === 'menu') await loadMenu();
+      if (name === 'shopping') await loadShopping();
+    }
+
+    async function loadRecipes() {
+      recipes = await (await fetch('/api/recipes')).json();
+      document.getElementById('recipes').innerHTML = `
+        <h2>Мои Рецепты</h2>
+        <button class="btn" onclick="addRecipe()ЯДобавить рецепт</button>
+        ${recipes.map(r => `<div class="recipe-card"><h3>${r.title}</h3><p>${r.description}</p></div>`).join('')}
+      `;
+    }
+
+    async function addRecipe() {
+      const title = prompt('Название рецепта:');
+      if (!title) return;
+      await fetch('/api/recipes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, description: '', ingredients: '', steps: '' })
+      });
+      loadRecipes();
+    }
+
+    async function loadMenu() {
+      document.getElementById('menu').innerHTML = '<h2>Меню на неделю</h2><p>Здесь будет планировщик меню</p>';
+    }
+
+    async function loadShopping() {
+      shopping = await (await fetch('/api/shopping')).json();
+      document.getElementById('shopping').innerHTML = `
+        <h2>Список покупок</h2>
+        <button class="btn" onclick="addShoppingItem()ЯДобавить</button>
+        ${shopping.map(item => `
+          <div class="shopping-item ${item.checked ? 'checked' : ''}">
+            <input type="checkbox" ${item.checked ? 'checked' : ''} onchange="toggleItem(${item.id})">
+            <span>${item.item}</span>
+          </div>
+        `).join('')}
+      `;
+    }
+
+    async function addShoppingItem() {
+      const item = prompt('Что купить?');
+      if (!item) return;
+      await fetch('/api/shopping', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item })
+      });
+      loadShopping();
+    }
+
+    async function toggleItem(id) {
+      const item = shopping.find(i => i.id === id);
+      await fetch(`/api/shopping/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ checked: !item.checked })
+      });
+      loadShopping();
+    }
+
+    async function logout() {
+      await fetch('/api/logout', { method: 'POST' });
+      user = null;
+      showAuth();
+    }
+
+    init();
+  </script>
+</body>
+</html>
