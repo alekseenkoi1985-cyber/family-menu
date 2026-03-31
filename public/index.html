@@ -1,191 +1,91 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Семейное Меню</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f5f5f5; }
-    .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
-    header { background: #4CAF50; color: white; padding: 20px; text-align: center; }
-    h1 { margin-bottom: 10px; }
-    nav { display: flex; justify-content: center; gap: 15px; margin-top: 15px; }
-    nav button { background: white; color: #4CAF50; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; font-weight: bold; }
-    nav button:hover { background: #f1f1f1; }
-    .section { background: white; padding: 30px; margin: 20px 0; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: none; }
-    .section.active { display: block; }
-    .btn { background: #4CAF50; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; }
-    .btn:hover { background: #45a049; }
-    input, textarea, select { width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ddd; border-radius: 4px; }
-    .recipe-card, .menu-day { background: #f9f9f9; padding: 15px; margin: 10px 0; border-radius: 5px; }
-    .auth-form { max-width: 400px; margin: 50px auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-    .shopping-item { display: flex; align-items: center; gap: 10px; padding: 10px; background: #f9f9f9; margin: 5px 0; border-radius: 4px; }
-    .shopping-item.checked { text-decoration: line-through; opacity: 0.6; }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Семейное Меню</title>
+    <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
-  <div id="app"></div>
-  <script>
-    let user = null;
-    let recipes = [];
-    let menu = [];
-    let shopping = [];
-
-    async function init() {
-      try {
-        const res = await fetch('/api/me');
-        if (res.ok) {
-          user = await res.json();
-          showDashboard();
-        } else {
-          showAuth();
-        }
-      } catch (e) {
-        showAuth();
-      }
-    }
-
-    function showAuth() {
-      document.getElementById('app').innerHTML = `
-        <div class="auth-form">
-          <h2>Вход / Регистрация</h2>
-          <input type="text" id="username" placeholder="Логин">
-          <input type="password" id="password" placeholder="Пароль">
-          <input type="text" id="name" placeholder="Ваше имя (необязательно)">
-      <button class="btn" onclick="login()">Войти</button>
-      <button class="btn" onclick="register()">Зарегистрироваться</button>        </div>
-      `;
-    }
-
-    async function login() {
-      const username = document.getElementById('username').value;
-      const password = document.getElementById('password').value;
-      const res = await fetch('/api/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password })
-      });
-      if (res.ok) {
-        user = (await res.json()).user;
-        showDashboard();
-      } else {
-        alert('Ошибка входа');
-      }
-    }
-
-    async function register() {
-      const username = document.getElementById('username').value;
-      const password = document.getElementById('password').value;
-      const name = document.getElementById('name').value;
-      const res = await fetch('/api/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password, name })
-      });
-      if (res.ok) {
-        user = (await res.json()).user;
-        showDashboard();
-      } else {
-        alert('Ошибка регистрации');
-      }
-    }
-
-    function showDashboard() {
-      document.getElementById('app').innerHTML = `
+    <div id="app">
         <header>
-          <h1>🍽️ Семейное Меню</h1>
-          <p>Привет, ${user.name}!</p>
-          <nav>
-            <button onclick="showSection('recipes')">Рецепты</button>
-            <button onclick="showSection('menu')">Меню на неделю</button>
-            <button onclick="showSection('shopping')">Список покупок</button>
-            <button onclick="logout()">Выход</button>
-          </nav>
+            <h1 id="page-title">Семейное Меню</h1>
+            <nav id="main-nav" class="hidden">
+                <button onclick="router.go('menu')">🍴 Меню</button>
+                <button onclick="router.go('vote')">🗳️ Голос</button>
+                <button onclick="router.go('pantry')">📦 Склад</button>
+                <button onclick="router.go('shopping')">🛒 Покупки</button>
+                <button onclick="router.go('admin')" id="nav-admin" class="hidden">⚙️ Админ</button>
+            </nav>
         </header>
-        <div class="container">
-          <div id="recipes" class="section"></div>
-          <div id="menu" class="section"></div>
-          <div id="shopping" class="section"></div>
+
+        <main id="content">
+            <!-- Сюда рендерится контент -->
+        </main>
+
+        <div id="loader" class="hidden">Загрузка...</div>
+    </div>
+
+    <!-- Шаблоны страниц -->
+    <template id="tpl-login">
+        <div class="page-login">
+            <h2>Кто зашел?</h2>
+            <div class="user-grid">
+                <button onclick="auth.select('Ирина')">Ирина (Админ)</button>
+                <button onclick="auth.login('Илья')">Илья</button>
+                <button onclick="auth.login('Ульяна')">Ульяна</button>
+                <button onclick="auth.login('Николай')">Николай</button>
+            </div>
+            <div id="pin-area" class="hidden">
+                <input type="password" id="pin-input" placeholder="Введите PIN" inputmode="numeric">
+                <button onclick="auth.login('Ирина')">Войти</button>
+            </div>
         </div>
-      `;
-      showSection('recipes');
-    }
+    </template>
 
-    async function showSection(name) {
-      document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
-      document.getElementById(name).classList.add('active');
-      if (name === 'recipes') await loadRecipes();
-      if (name === 'menu') await loadMenu();
-      if (name === 'shopping') await loadShopping();
-    }
+    <template id="tpl-pantry">
+        <div class="page-pantry">
+            <h2>Кладовая</h2>
+            <div class="add-item" id="admin-pantry-controls">
+                <input type="text" id="p-name" placeholder="Продукт">
+                <input type="number" id="p-qty" placeholder="Кол-во">
+                <input type="text" id="p-unit" placeholder="Ед.изм">
+                <button onclick="pantry.add()">Добавить</button>
+            </div>
+            <ul id="pantry-list"></ul>
+        </div>
+    </template>
 
-    async function loadRecipes() {
-      recipes = await (await fetch('/api/recipes')).json();
-      document.getElementById('recipes').innerHTML = `
-        <h2>Мои Рецепты</h2>
-        <button class="btn" onclick="addRecipe(">ЯДобавить рецепт</button>
-        ${recipes.map(r => `<div class="recipe-card"><h3>${r.title}</h3><p>${r.description}</p></div>`).join('')}
-      `;
-    }
+    <template id="tpl-vote">
+        <div class="page-vote">
+            <h2>Голосование за меню</h2>
+            <div id="vote-options" class="options-grid"></div>
+        </div>
+    </template>
 
-    async function addRecipe() {
-      const title = prompt('Название рецепта:');
-      if (!title) return;
-      await fetch('/api/recipes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, description: '', ingredients: '', steps: '' })
-      });
-      loadRecipes();
-    }
+    <template id="tpl-shopping">
+        <div class="page-shopping">
+            <h2>Список покупок</h2>
+            <div class="shopping-legend">
+                <span class="tag in-home">Уже есть</span>
+                <span class="tag need-buy">Купить</span>
+            </div>
+            <ul id="shopping-list"></ul>
+        </div>
+    </template>
 
-    async function loadMenu() {
-      document.getElementById('menu').innerHTML = '<h2>Меню на неделю</h2><p>Здесь будет планировщик меню</p>';
-    }
+    <template id="tpl-admin">
+        <div class="page-admin">
+            <h2>Панель управления</h2>
+            <button class="btn-main" onclick="admin.generateMenu()">Сгенерировать 4 варианта меню</button>
+            <div id="admin-status"></div>
+            <div class="stats">
+                <p>Рецептов в базе: <span id="stat-recipes">...</span></p>
+                <p>Погода: <span id="stat-weather">...</span></p>
+            </div>
+        </div>
+    </template>
 
-    async function loadShopping() {
-      shopping = await (await fetch('/api/shopping')).json();
-      document.getElementById('shopping').innerHTML = `
-        <h2>Список покупок</h2>
-        <button class="btn" onclick="addShoppingItem(">ЯДобавить</button>
-        ${shopping.map(item => `
-          <div class="shopping-item ${item.checked ? 'checked' : ''}">
-            <input type="checkbox" ${item.checked ? 'checked' : ''} onchange="toggleItem(${item.id})">
-            <span>${item.item}</span>
-          </div>
-        `).join('')}
-      `;
-    }
-
-    async function addShoppingItem() {
-      const item = prompt('Что купить?');
-      if (!item) return;
-      await fetch('/api/shopping', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ item })
-      });
-      loadShopping();
-    }
-
-    async function toggleItem(id) {
-      const item = shopping.find(i => i.id === id);
-      await fetch(`/api/shopping/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ checked: !item.checked })
-      });
-      loadShopping();
-    }
-
-    async function logout() {
-      await fetch('/api/logout', { method: 'POST' });
-      user = null;
-      showAuth();
-    }
-
-    init();
-  </script>
+    <script src="/js/app.js"></script>
 </body>
 </html>
