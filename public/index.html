@@ -9,13 +9,14 @@
 <body>
     <div id="app">
         <header>
-            <h1 id="page-title">Семейное Меню</h1>
+            <h1 id="page-title">🍴 Семейное Меню</h1>
             <nav id="main-nav" class="hidden">
-                <button onclick="router.go('menu')">🍴 Меню</button>
-                <button onclick="router.go('vote')">🗳️ Голос</button>
-                <button onclick="router.go('pantry')">📦 Склад</button>
-                <button onclick="router.go('shopping')">🛒 Покупки</button>
-                <button onclick="router.go('admin')" id="nav-admin" class="hidden">⚙️ Админ</button>
+                <button onclick="router.go('menu')" title="Меню">📅</button>
+                <button onclick="router.go('vote')" title="Голос">🗳️</button>
+                <button onclick="router.go('pantry')" title="Склад">📦</button>
+                <button onclick="router.go('shopping')" title="Покупки">🛒</button>
+                <button onclick="router.go('admin')" id="nav-admin" class="hidden" title="Админ">⚙️</button>
+                <button onclick="api.logout()" title="Выход">🚪</button>
             </nav>
         </header>
 
@@ -24,65 +25,74 @@
         </main>
 
         <div id="loader" class="hidden">Загрузка...</div>
+        <div id="toast" class="hidden"></div>
     </div>
 
-    <!-- Шаблоны страниц -->
+    <!-- Templates -->
     <template id="tpl-login">
-        <div class="page-login">
-            <h2>Кто зашел?</h2>
+        <div class="page login-page">
+            <h2>Кто ты сегодня?</h2>
             <div class="user-grid">
-                <button onclick="auth.select('Ирина')">Ирина (Админ)</button>
-                <button onclick="auth.login('Илья')">Илья</button>
-                <button onclick="auth.login('Ульяна')">Ульяна</button>
-                <button onclick="auth.login('Николай')">Николай</button>
+                <div class="user-card" onclick="ui.showPin('Ирина')">👸 Ирина (Админ)</div>
+                <div class="user-card" onclick="api.login('Илья')">👦 Илья</div>
+                <div class="user-card" onclick="api.login('Ульяна')">👧 Ульяна</div>
+                <div class="user-card" onclick="api.login('Николай')">👨 Николай</div>
             </div>
-            <div id="pin-area" class="hidden">
-                <input type="password" id="pin-input" placeholder="Введите PIN" inputmode="numeric">
-                <button onclick="auth.login('Ирина')">Войти</button>
+            <div id="pin-modal" class="hidden">
+                <div class="modal-content">
+                    <h3>Введите PIN для Ирины</h3>
+                    <input type="password" id="pin-input" placeholder="****" inputmode="numeric">
+                    <button onclick="api.login('Ирина', document.getElementById('pin-input').value)">Войти</button>
+                    <button onclick="ui.hidePin()">Отмена</button>
+                </div>
             </div>
         </div>
     </template>
 
     <template id="tpl-pantry">
-        <div class="page-pantry">
-            <h2>Кладовая</h2>
-            <div class="add-item" id="admin-pantry-controls">
-                <input type="text" id="p-name" placeholder="Продукт">
-                <input type="number" id="p-qty" placeholder="Кол-во">
-                <input type="text" id="p-unit" placeholder="Ед.изм">
-                <button onclick="pantry.add()">Добавить</button>
+        <div class="page">
+            <h2>📦 Кладовая</h2>
+            <div id="pantry-admin" class="hidden">
+                <div class="form-group">
+                    <input type="text" id="p-name" placeholder="Продукт">
+                    <input type="number" id="p-qty" placeholder="Кол-во">
+                    <input type="text" id="p-unit" placeholder="Ед. изм.">
+                    <button onclick="pantry.add()">Добавить</button>
+                </div>
             </div>
-            <ul id="pantry-list"></ul>
+            <div id="pantry-list" class="list"></div>
         </div>
     </template>
 
     <template id="tpl-vote">
-        <div class="page-vote">
-            <h2>Голосование за меню</h2>
-            <div id="vote-options" class="options-grid"></div>
+        <div class="page">
+            <h2>🗳️ Голосование за меню</h2>
+            <p>Выберите лучший вариант на неделю:</p>
+            <div id="vote-options" class="vote-grid"></div>
+        </div>
+    </template>
+
+    <template id="tpl-menu">
+        <div class="page">
+            <h2>📅 Текущее Меню</h2>
+            <div id="active-menu" class="menu-container"></div>
         </div>
     </template>
 
     <template id="tpl-shopping">
-        <div class="page-shopping">
-            <h2>Список покупок</h2>
-            <div class="shopping-legend">
-                <span class="tag in-home">Уже есть</span>
-                <span class="tag need-buy">Купить</span>
-            </div>
-            <ul id="shopping-list"></ul>
+        <div class="page">
+            <h2>🛒 Список покупок</h2>
+            <div id="shopping-list" class="list"></div>
         </div>
     </template>
 
     <template id="tpl-admin">
-        <div class="page-admin">
-            <h2>Панель управления</h2>
-            <button class="btn-main" onclick="admin.generateMenu()">Сгенерировать 4 варианта меню</button>
-            <div id="admin-status"></div>
-            <div class="stats">
-                <p>Рецептов в базе: <span id="stat-recipes">...</span></p>
-                <p>Погода: <span id="stat-weather">...</span></p>
-            </div>
+        <div class="page">
+            <h2>⚙️ Админ-панель</h2>
+            <button class="btn-large" onclick="admin.generateMenu()">🎲 Сгенерировать варианты меню</button>
+            <hr>
+            <h3>Управление рецептами</h3>
+            <div id="admin-recipes-list"></div>
         </div>
     </template>
 
