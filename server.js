@@ -1,261 +1,266 @@
 const express = require('express');
 const session = require('express-session');
+const SQLiteStore = require('connect-sqlite3')(session);
 const path = require('path');
 const fs = require('fs');
 const Database = require('better-sqlite3');
-const bcrypt = require('bcrypt');
+const crypto = require('crypto');
+const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-
-// Ensure data directory exists
 const dataDir = path.join(__dirname, 'data');
 if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
 
-// Database setup
 const db = new Database(path.join(dataDir, 'family_menu.db'));
 
-// Init tables
+// Инициализация БД
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT UNIQUE NOT NULL,
-    password TEXT NOT NULL,
-    name TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    username TEXT UNIQUE,
+    role TEXT,
+    pin_hash TEXT
   );
   CREATE TABLE IF NOT EXISTS recipes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    title TEXT NOT NULL,
-    description TEXT,
+    name_ru TEXT,
+    name_en TEXT,
+    category TEXT,
     ingredients TEXT,
-    steps TEXT,
-    category TEXT DEFAULT 'other',
-    servings INTEGER DEFAULT 2,
-    cook_time INTEGER DEFAULT 30,
+    instructions TEXT,
     image_url TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(id)
+    health_score INTEGER,
+    rating REAL DEFAULT 5.0
   );
-  CREATE TABLE IF NOT EXISTS menu_plans (
+  CREATE TABLE IF NOT EXISTS pantry (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    date TEXT NOT NULL,
-    meal_type TEXT NOT NULL,
-    recipe_id INTEGER,
-    custom_meal TEXT,
-    FOREIGN KEY (user_id) REFERENCES users(id),
-    FOREIGN KEY (recipe_id) REFERENCES recipes(id)
+    product TEXT UNIQUE,
+    quantity REAL,
+    unit TEXT
+  );
+  CREATE TABLE IF NOT EXISTS menu_candidates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    gen_date TEXT,
+    option_index INTEGER,
+    data TEXT,
+    status TEXT DEFAULT 'pending'
+  );
+  CREATE TABLE IF NOT EXISTS weekly_menu (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    start_date TEXT,
+    data TEXT,
+    status TEXT DEFAULT 'approved'
+  );
+  CREATE TABLE IF NOT EXISTS votes (
+    user_id INTEGER,
+    option_index INTEGER,
+    week_id INTEGER,
+    PRIMARY KEY(user_id, week_id)
   );
   CREATE TABLE IF NOT EXISTS shopping_list (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    item TEXT NOT NULL,
-    quantity TEXT,
+    product TEXT,
+    quantity REAL,
     unit TEXT,
-    checked INTEGER DEFAULT 0,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(id)
+    in_pantry INTEGER DEFAULT 0
   );
 `);
 
+// Предзаполнение пользователей
+const users = [
+  { username: 'Ирина', role: 'admin', pin: '205858' },
+  { username: 'Илья', role: 'member' },
+  { username: 'Ульяна', role: 'member' },
+  { username: 'Николай', role: 'member' }
+];
+
+users.forEach(u => {
+  const hash = u.pin ? crypto.createHash('sha256').update(u.pin).digest('hex') : null;
+  db.prepare('INSERT OR IGNORE INTO users (username, role, pin_hash) VALUES (?, ?, ?)').run(u.username, u.role, hash);
+});
+
 // Middleware
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(session({
-  secret: 'family-menu-secret-2024',
+  store: new SQLiteStore({ dir: dataDir, db: 'sessions.db' }),
+  secret: 'family-menu-secret-888',
   resave: false,
   saveUninitialized: false,
-  cookie: { maxAge: 7 * 24 * 60 * 60 * 1000 }
+  cookie: { maxAge: 30 * 24 * 60 * 60 * 1000, httpOnly: true }
 }));
 
-// Auth middleware
-const requireAuth = (req, res, next) => {
-  if (req.session && req.session.userId) return next();
-  res.status(401).json({ error: 'Not authenticated' });
-};
-
-// Auth routes
-app.post('/api/register', async (req, res) => {
-  try {
-    const { username, password, name } = req.body;
-    if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
-    const hash = await bcrypt.hash(password, 10);
-    const stmt = db.prepare('INSERT INTO users (username, password, name) VALUES (?, ?, ?)');
-    const result = stmt.run(username, hash, name || username);
-    req.session.userId = result.lastInsertRowid;
-    req.session.username = username;
-    req.session.name = name || username;
-    res.json({ success: true, user: { id: result.lastInsertRowid, username, name: name || username } });
-  } catch (e) {
-    if (e.message.includes('UNIQUE')) return res.status(400).json({ error: 'Username already exists' });
-    res.status(500).json({ error: e.message });
+// Auth
+app.post('/api/login', (req, res) => {
+  const { username, pin } = req.body;
+  const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
+  if (!user) return res.status(401).json({ error: 'Пользователь не найден' });
+  if (user.role === 'admin') {
+    const hash = crypto.createHash('sha256').update(pin || '').digest('hex');
+    if (hash !== user.pin_hash) return res.status(401).json({ error: 'Неверный PIN' });
   }
+  req.session.userId = user.id;
+  req.session.username = user.username;
+  req.session.role = user.role;
+  res.json({ success: true, user: { username: user.username, role: user.role } });
 });
 
-app.post('/api/login', async (req, res) => {
-  try {
-    const { username, password } = req.body;
-    const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
-    if (!user) return res.status(401).json({ error: 'Invalid credentials' });
-    const match = await bcrypt.compare(password, user.password);
-    if (!match) return res.status(401).json({ error: 'Invalid credentials' });
-    req.session.userId = user.id;
-    req.session.username = user.username;
-    req.session.name = user.name;
-    res.json({ success: true, user: { id: user.id, username: user.username, name: user.name } });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
+app.get('/api/me', (req, res) => {
+  if (!req.session.userId) return res.status(401).json({ error: 'Не авторизован' });
+  res.json({ username: req.session.username, role: req.session.role });
 });
 
-app.post('/api/logout', (req, res) => {
-  req.session.destroy();
+// Pantry
+app.get('/api/pantry', (req, res) => {
+  res.json(db.prepare('SELECT * FROM pantry').all());
+});
+
+app.post('/api/pantry', (req, res) => {
+  if (req.session.role !== 'admin') return res.status(403).send();
+  const { product, quantity, unit } = req.body;
+  db.prepare('INSERT OR REPLACE INTO pantry (product, quantity, unit) VALUES (?, ?, ?)').run(product, quantity, unit);
   res.json({ success: true });
 });
 
-app.get('/api/me', requireAuth, (req, res) => {
-  const user = db.prepare('SELECT id, username, name FROM users WHERE id = ?').get(req.session.userId);
-  res.json(user);
-});
-
-// Recipes routes
-app.get('/api/recipes', requireAuth, (req, res) => {
-  const recipes = db.prepare('SELECT * FROM recipes WHERE user_id = ? ORDER BY created_at DESC').all(req.session.userId);
-  res.json(recipes);
-});
-
-app.post('/api/recipes', requireAuth, (req, res) => {
-  try {
-    const { title, description, ingredients, steps, category, servings, cook_time } = req.body;
-    if (!title) return res.status(400).json({ error: 'Title required' });
-    const stmt = db.prepare('INSERT INTO recipes (user_id, title, description, ingredients, steps, category, servings, cook_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
-    const result = stmt.run(req.session.userId, title, description || '', ingredients || '', steps || '', category || 'other', servings || 2, cook_time || 30);
-    res.json({ id: result.lastInsertRowid, ...req.body, user_id: req.session.userId });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-app.put('/api/recipes/:id', requireAuth, (req, res) => {
-  try {
-    const { title, description, ingredients, steps, category, servings, cook_time } = req.body;
-    const recipe = db.prepare('SELECT * FROM recipes WHERE id = ? AND user_id = ?').get(req.params.id, req.session.userId);
-    if (!recipe) return res.status(404).json({ error: 'Recipe not found' });
-    db.prepare('UPDATE recipes SET title=?, description=?, ingredients=?, steps=?, category=?, servings=?, cook_time=? WHERE id=?')
-      .run(title, description, ingredients, steps, category, servings, cook_time, req.params.id);
-    res.json({ success: true });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-app.delete('/api/recipes/:id', requireAuth, (req, res) => {
-  const recipe = db.prepare('SELECT * FROM recipes WHERE id = ? AND user_id = ?').get(req.params.id, req.session.userId);
-  if (!recipe) return res.status(404).json({ error: 'Recipe not found' });
-  db.prepare('DELETE FROM recipes WHERE id = ?').run(req.params.id);
-  res.json({ success: true });
-});
-
-// Menu plans
-app.get('/api/menu', requireAuth, (req, res) => {
-  const { week } = req.query;
-  const plans = db.prepare(`
-    SELECT mp.*, r.title as recipe_title, r.description as recipe_desc
-    FROM menu_plans mp
-    LEFT JOIN recipes r ON mp.recipe_id = r.id
-    WHERE mp.user_id = ? AND mp.date LIKE ?
-    ORDER BY mp.date, mp.meal_type
-  `).all(req.session.userId, week ? `${week}%` : '%');
-  res.json(plans);
-});
-
-app.post('/api/menu', requireAuth, (req, res) => {
-  try {
-    const { date, meal_type, recipe_id, custom_meal } = req.body;
-    const existing = db.prepare('SELECT id FROM menu_plans WHERE user_id=? AND date=? AND meal_type=?').get(req.session.userId, date, meal_type);
-    if (existing) {
-      db.prepare('UPDATE menu_plans SET recipe_id=?, custom_meal=? WHERE id=?').run(recipe_id || null, custom_meal || null, existing.id);
-      res.json({ success: true, id: existing.id });
-    } else {
-      const result = db.prepare('INSERT INTO menu_plans (user_id, date, meal_type, recipe_id, custom_meal) VALUES (?, ?, ?, ?, ?)').run(req.session.userId, date, meal_type, recipe_id || null, custom_meal || null);
-      res.json({ success: true, id: result.lastInsertRowid });
-    }
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-app.delete('/api/menu/:id', requireAuth, (req, res) => {
-  db.prepare('DELETE FROM menu_plans WHERE id=? AND user_id=?').run(req.params.id, req.session.userId);
-  res.json({ success: true });
-});
-
-// Shopping list
-app.get('/api/shopping', requireAuth, (req, res) => {
-  const items = db.prepare('SELECT * FROM shopping_list WHERE user_id=? ORDER BY checked, created_at DESC').all(req.session.userId);
-  res.json(items);
-});
-
-app.post('/api/shopping', requireAuth, (req, res) => {
-  try {
-    const { item, quantity, unit } = req.body;
-    if (!item) return res.status(400).json({ error: 'Item required' });
-    const result = db.prepare('INSERT INTO shopping_list (user_id, item, quantity, unit) VALUES (?, ?, ?, ?)').run(req.session.userId, item, quantity || '', unit || '');
-    res.json({ id: result.lastInsertRowid, item, quantity, unit, checked: 0 });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-app.put('/api/shopping/:id', requireAuth, (req, res) => {
-  const { checked } = req.body;
-  db.prepare('UPDATE shopping_list SET checked=? WHERE id=? AND user_id=?').run(checked ? 1 : 0, req.params.id, req.session.userId);
-  res.json({ success: true });
-});
-
-app.delete('/api/shopping/:id', requireAuth, (req, res) => {
-  db.prepare('DELETE FROM shopping_list WHERE id=? AND user_id=?').run(req.params.id, req.session.userId);
-  res.json({ success: true });
-});
-
-app.delete('/api/shopping', requireAuth, (req, res) => {
-  db.prepare('DELETE FROM shopping_list WHERE user_id=? AND checked=1').run(req.session.userId);
-  res.json({ success: true });
-});
-
-// Generate shopping list from menu
-app.post('/api/shopping/generate', requireAuth, (req, res) => {
-  try {
-    const { week } = req.body;
-    const plans = db.prepare(`
-      SELECT r.ingredients FROM menu_plans mp
-      JOIN recipes r ON mp.recipe_id = r.id
-      WHERE mp.user_id=? AND mp.date LIKE ?
-    `).all(req.session.userId, `${week}%`);
-    const allIngredients = plans.map(p => p.ingredients).join('\n');
-    const lines = allIngredients.split('\n').filter(l => l.trim());
-    const added = [];
-    for (const line of lines) {
-      const trimmed = line.trim().replace(/^[-*]\s*/, '');
-      if (trimmed) {
-        db.prepare('INSERT INTO shopping_list (user_id, item) VALUES (?, ?)').run(req.session.userId, trimmed);
-        added.push(trimmed);
+// Recipes Import (TheMealDB)
+async function importRecipes() {
+  const count = db.prepare('SELECT COUNT(*) as c FROM recipes').get().c;
+  if (count >= 300) return;
+  console.log('Импорт рецептов...');
+  const categories = ['Beef', 'Chicken', 'Dessert', 'Lamb', 'Pork', 'Seafood', 'Side', 'Starter', 'Vegetarian', 'Breakfast'];
+  for (const cat of categories) {
+    try {
+      const res = await fetch(`https://www.themealdb.com/api/json/v1/1/filter.php?c=${cat}`);
+      const data = await res.json();
+      if (!data.meals) continue;
+      for (const m of data.meals.slice(0, 40)) {
+        const detailRes = await fetch(`https://www.themealdb.com/api/json/v1/1/lookup.php?i=${m.idMeal}`);
+        const detail = await detailRes.json();
+        const meal = detail.meals[0];
+        const ingredients = [];
+        for (let i = 1; i <= 20; i++) {
+          if (meal[`strIngredient${i}`]) {
+            ingredients.push({ name: meal[`strIngredient${i}`], amount: meal[`strMeasure${i}`] });
+          }
+        }
+        db.prepare('INSERT OR IGNORE INTO recipes (name_en, category, ingredients, instructions, image_url, health_score) VALUES (?, ?, ?, ?, ?, ?)')
+          .run(meal.strMeal, cat, JSON.stringify(ingredients), meal.strInstructions, meal.strMealThumb, Math.floor(Math.random() * 10) + 1);
       }
-    }
-    res.json({ success: true, added: added.length });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
+    } catch (e) { console.error(e); }
   }
+}
+importRecipes();
+
+// Menu Generation Algorithm
+app.post('/api/menu/generate', async (req, res) => {
+  if (req.session.role !== 'admin') return res.status(403).send();
+  
+  // Погода
+  let temp = 20;
+  try {
+    const weather = await fetch('https://api.open-meteo.com/v1/forecast?latitude=59.93&longitude=30.31&current_weather=true');
+    const wData = await weather.json();
+    temp = wData.current_weather.temperature;
+  } catch (e) {}
+
+  const allRecipes = db.prepare('SELECT * FROM recipes').all();
+  const options = [];
+  
+  for (let opt = 0; opt < 4; opt++) {
+    const menu = {
+      days: []
+    };
+    
+    for (let d = 0; d < 7; d++) {
+      const isWeekend = d >= 5;
+      const day = {
+        breakfast: { main: getRandom(allRecipes, 'Breakfast'), drink: 'Чай/Кофе' },
+        dinner: { 
+          salad: getRandom(allRecipes, temp > 20 ? 'Vegetarian' : 'Starter'),
+          side: getRandom(allRecipes, 'Side'),
+          main: getRandom(allRecipes, ['Beef', 'Chicken', 'Seafood', 'Pork']),
+          dessert: getRandom(allRecipes, 'Dessert'),
+          drink: 'Компот'
+        }
+      };
+      if (isWeekend) {
+        day.lunch = {
+          salad: getRandom(allRecipes, 'Starter'),
+          soup: getRandom(allRecipes, temp < 15 ? 'Beef' : 'Vegetarian'),
+          dessert: getRandom(allRecipes, 'Dessert'),
+          drink: 'Сок'
+        };
+      }
+      menu.days.push(day);
+    }
+    options.push(menu);
+  }
+
+  db.prepare('DELETE FROM menu_candidates').run();
+  options.forEach((opt, i) => {
+    db.prepare('INSERT INTO menu_candidates (option_index, data) VALUES (?, ?)').run(i, JSON.stringify(opt));
+  });
+  
+  res.json({ success: true });
 });
 
-// Serve SPA
+function getRandom(list, cats) {
+  if (!Array.isArray(cats)) cats = [cats];
+  const filtered = list.filter(r => cats.includes(r.category));
+  return filtered[Math.floor(Math.random() * filtered.length)] || list[0];
+}
+
+app.get('/api/menu/candidates', (req, res) => {
+  const data = db.prepare('SELECT * FROM menu_candidates').all();
+  res.json(data.map(d => ({ ...d, data: JSON.parse(d.data) })));
+});
+
+app.post('/api/menu/vote', (req, res) => {
+  if (!req.session.userId) return res.status(401).send();
+  const { option_index } = req.body;
+  db.prepare('INSERT OR REPLACE INTO votes (user_id, option_index, week_id) VALUES (?, ?, 1)').run(req.session.userId, option_index);
+  
+  // Проверка завершения голосования
+  const totalVotes = db.prepare('SELECT COUNT(*) as c FROM votes WHERE week_id = 1').get().c;
+  if (totalVotes >= 4) {
+    const winner = db.prepare('SELECT option_index, COUNT(*) as c FROM votes WHERE week_id = 1 GROUP BY option_index ORDER BY c DESC LIMIT 1').get();
+    const winData = db.prepare('SELECT data FROM menu_candidates WHERE option_index = ?').get(winner.option_index).data;
+    db.prepare('INSERT INTO weekly_menu (start_date, data) VALUES (?, ?)').run(new Date().toISOString(), winData);
+    db.prepare('UPDATE menu_candidates SET status = "approved" WHERE option_index = ?').run(winner.option_index);
+    
+    // Генерация списка покупок
+    const menu = JSON.parse(winData);
+    db.prepare('DELETE FROM shopping_list').run();
+    const pantry = db.prepare('SELECT product FROM pantry').all().map(p => p.product.toLowerCase());
+    
+    // Плоская выборка всех ингредиентов
+    menu.days.forEach(day => {
+      [day.breakfast, day.lunch, day.dinner].forEach(meal => {
+        if (!meal) return;
+        Object.values(meal).forEach(recipe => {
+          if (recipe && recipe.ingredients) {
+            const ings = JSON.parse(recipe.ingredients);
+            ings.forEach(i => {
+              const inHome = pantry.includes(i.name.toLowerCase()) ? 1 : 0;
+              db.prepare('INSERT INTO shopping_list (product, quantity, unit, in_pantry) VALUES (?, ?, ?, ?)').run(i.name, 1, i.amount, inHome);
+            });
+          }
+        });
+      });
+    });
+  }
+  res.json({ success: true });
+});
+
+app.get('/api/shopping', (req, res) => {
+  res.json(db.prepare('SELECT * FROM shopping_list').all());
+});
+
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 app.listen(PORT, () => {
-  console.log(`Family Menu server running on port ${PORT}`);
+  console.log(`Server started on port ${PORT}`);
 });
