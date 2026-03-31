@@ -1,0 +1,88 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Deploy to server
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: root
+          password: ${{ secrets.SSH_PASSWORD }}
+          script: |
+            set -e
+            cd /root
+            
+            # Install Node.js if not present
+            if ! command -v node &> /dev/null; then
+              curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
+              apt-get install -y nodejs
+            fi
+            
+            # Install PM2 if not present
+            if ! command -v pm2 &> /dev/null; then
+              npm install -g pm2
+            fi
+            
+            # Install Nginx if not present
+            if ! command -v nginx &> /dev/null; then
+              apt-get update
+              apt-get install -y nginx
+            fi
+            
+            # Clone or update repository
+            if [ -d "family-menu" ]; then
+              cd family-menu
+              git pull origin main
+            else
+              git clone https://github.com/alekseenkoi1985-cyber/family-menu.git
+              cd family-menu
+            fi
+            
+            # Install dependencies
+            npm install
+            
+            # Stop existing PM2 process
+            pm2 stop family-menu || true
+            pm2 delete family-menu || true
+            
+            # Start app with PM2
+            pm2 start server.js --name family-menu
+            pm2 save
+            pm2 startup systemd -u root --hp /root || true
+            
+            # Configure Nginx
+            cat > /etc/nginx/sites-available/family-menu <<'EOF'
+            server {
+              listen 80;
+              server_name _;
+              
+              location / {
+                proxy_pass http://localhost:3000;
+                proxy_http_version 1.1;
+                proxy_set_header Upgrade \$http_upgrade;
+                proxy_set_header Connection 'upgrade';
+                proxy_set_header Host \$host;
+                proxy_cache_bypass \$http_upgrade;
+              }
+            }
+            EOF
+            
+            # Enable site
+            ln -sf /etc/nginx/sites-available/family-menu /etc/nginx/sites-enabled/
+            rm -f /etc/nginx/sites-enabled/default
+            
+            # Test and reload Nginx
+            nginx -t
+            systemctl restart nginx
+            
+            echo "Deployment complete! App running on http://${{secrets.SERVER_HOST}}"
