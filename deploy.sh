@@ -11,8 +11,8 @@ cd $APP_DIR
 
 echo "[1/3] Pull latest changes..."
 git clean -fd
-git reset --hard HEAD
-git pull origin main
+git fetch origin
+git reset --hard origin/main
 
 echo "[2/3] Running install script..."
 chmod +x install.sh
