@@ -42,7 +42,10 @@ jobs:
             # Клонирование или обновление репозитория
             if [ -d "/root/family-menu" ]; then
               cd /root/family-menu
-              git pull origin main
+                            git clean -fd
+                                          git fetch origin
+                                                        git reset --hard origin/main
+
             else
               git clone https://github.com/alekseenkoi1985-cyber/family-menu.git /root/family-menu
               cd /root/family-menu
