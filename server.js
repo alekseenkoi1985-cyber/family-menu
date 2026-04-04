@@ -14,6 +14,7 @@ if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
 
 const db = new Database(path.join(dataDir, 'family_menu.db'));
 
+// Инициализация БД
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -66,6 +67,7 @@ db.exec(`
   );
 `);
 
+// Пользователи
 const USERS = [
   { username: 'Ирина', role: 'admin', pin: '205858' },
   { username: 'Илья', role: 'member' },
@@ -88,6 +90,7 @@ app.use(session({
   cookie: { maxAge: 30 * 24 * 60 * 60 * 1000, httpOnly: true }
 }));
 
+// API: Auth
 app.post('/api/login', (req, res) => {
   const { username, pin } = req.body;
   const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
@@ -112,6 +115,7 @@ app.post('/api/logout', (req, res) => {
   res.json({ success: true });
 });
 
+// API: Pantry (Кладовая)
 app.get('/api/pantry', (req, res) => {
   res.json(db.prepare('SELECT * FROM pantry ORDER BY product').all());
 });
@@ -120,7 +124,7 @@ app.post('/api/pantry', (req, res) => {
   if (req.session.role !== 'admin') return res.status(403).json({ error: 'Только для администратора' });
   const { product, quantity, unit } = req.body;
   if (!product) return res.status(400).json({ error: 'Укажите продукт' });
-  db.prepare('INSERT OR REPLACE INTO pantry (product, quantity, unit) VALUES (?, ?, ?)').run(product, quantity || 0, unit || 'шт');
+  db.prepare('INSERT OR REPLACE INTO pantry (product, quantity, unit) VALUES (?, ?, ?)').run(product.trim(), quantity || 0, unit || 'шт');
   res.json({ success: true });
 });
 
@@ -130,61 +134,46 @@ app.delete('/api/pantry/:id', (req, res) => {
   res.json({ success: true });
 });
 
+// API: Recipes
 app.get('/api/recipes/count', (req, res) => {
   const count = db.prepare('SELECT COUNT(*) as count FROM recipes').get();
   res.json(count);
 });
 
-async function importRecipes() {
-  const count = db.prepare('SELECT COUNT(*) as c FROM recipes').get().c;
-  if (count >= 200) return console.log('Рецепты уже импортированы:', count);
-  console.log('Начинаю импорт рецептов из TheMealDB...');
-  const categories = ['Beef','Chicken','Dessert','Lamb','Pork','Seafood','Side','Starter','Vegetarian','Breakfast'];
-  for (const cat of categories) {
-    try {
-      const r = await fetch(`https://www.themealdb.com/api/json/v1/1/filter.php?c=${cat}`);
-      const data = await r.json();
-      if (!data.meals) continue;
-      for (const m of data.meals.slice(0, 35)) {
-        try {
-          const dr = await fetch(`https://www.themealdb.com/api/json/v1/1/lookup.php?i=${m.idMeal}`);
-          const dd = await dr.json();
-          const meal = dd.meals[0];
-          const ings = [];
-          for (let i = 1; i <= 20; i++) {
-            if (meal[`strIngredient${i}`] && meal[`strIngredient${i}`].trim()) {
-              ings.push({ name: meal[`strIngredient${i}`].trim(), amount: (meal[`strMeasure${i}`] || '').trim() });
-            }
-          }
-          db.prepare('INSERT OR IGNORE INTO recipes (name_en, category, ingredients, instructions, image_url, health_score) VALUES (?, ?, ?, ?, ?, ?)').run(
-            meal.strMeal, cat, JSON.stringify(ings), meal.strInstructions || '', meal.strMealThumb || '',
-            Math.floor(Math.random() * 5) + 5
-          );
-        } catch(e) {}
-      }
-    } catch(e) { console.error('Ошибка категории', cat, e.message); }
-  }
-  console.log('Импорт завершён. Итого:', db.prepare('SELECT COUNT(*) as c FROM recipes').get().c);
-}
-
-importRecipes();
-
+// Улучшенная генерация меню (Шаг 2)
 app.post('/api/menu/generate', async (req, res) => {
   if (req.session.role !== 'admin') return res.status(403).json({ error: 'Только для администратора' });
+  
   let temp = 15;
   try {
     const wr = await fetch('https://api.open-meteo.com/v1/forecast?latitude=59.93&longitude=30.31&current_weather=true');
     const wd = await wr.json();
     temp = wd.current_weather.temperature;
-  } catch(e) { console.log('Погода недоступна, используем', temp); }
+  } catch(e) { console.log('Weather fallback'); }
 
+  const pantryItems = db.prepare('SELECT product FROM pantry').all().map(p => p.product.toLowerCase());
   const allRecipes = db.prepare('SELECT * FROM recipes').all();
-  if (allRecipes.length < 10) return res.status(400).json({ error: 'Недостаточно рецептов. Дождитесь импорта.' });
+  if (allRecipes.length < 50) return res.status(400).json({ error: 'Недостаточно рецептов в базе (нужно >50)' });
 
-  const getR = (cats) => {
+  const scoreRecipe = (r) => {
+    let score = 50;
+    // Погода
+    if (temp < 10 && ['Beef','Lamb','Pork'].includes(r.category)) score += 20;
+    if (temp > 22 && ['Vegetarian','Starter','Dessert'].includes(r.category)) score += 20;
+    // Кладовая
+    try {
+      const ings = JSON.parse(r.ingredients || '[]');
+      const match = ings.filter(i => pantryItems.some(p => i.name.toLowerCase().includes(p))).length;
+      score += (match * 10);
+    } catch(e) {}
+    return score + (Math.random() * 20);
+  };
+
+  const getBest = (cats, count=1) => {
     if (!Array.isArray(cats)) cats = [cats];
-    const f = allRecipes.filter(r => cats.includes(r.category));
-    return f.length ? f[Math.floor(Math.random() * f.length)] : allRecipes[Math.floor(Math.random() * allRecipes.length)];
+    let filtered = allRecipes.filter(r => cats.includes(r.category));
+    if (!filtered.length) filtered = allRecipes;
+    return filtered.sort((a,b) => scoreRecipe(b) - scoreRecipe(a)).slice(0, count + 5).sort(() => Math.random() - 0.5)[0];
   };
 
   db.prepare('DELETE FROM menu_candidates').run();
@@ -195,31 +184,28 @@ app.post('/api/menu/generate', async (req, res) => {
     for (let d = 0; d < 7; d++) {
       const isWeekend = d >= 5;
       const day = {
-        breakfast: {
-          main: getR('Breakfast'),
-          drink: temp > 18 ? 'Сок / Смузи' : 'Чай / Кофе'
-        },
-        dinner: {
-          salad: getR(temp > 20 ? ['Vegetarian','Starter'] : ['Starter']),
-          side: getR('Side'),
-          main: getR(['Beef','Chicken','Seafood','Pork','Lamb']),
-          dessert: getR('Dessert'),
-          drink: temp > 20 ? 'Компот / Морс' : 'Чай / Кофе'
+        breakfast: { main: getBest('Breakfast'), drink: temp > 18 ? 'Холодный сок' : 'Горячий чай' },
+        dinner: { 
+          salad: getBest(temp > 20 ? ['Vegetarian','Starter'] : 'Starter'),
+          side: getBest('Side'),
+          main: getBest(['Beef','Chicken','Seafood','Pork','Lamb']),
+          dessert: getBest('Dessert'),
+          drink: temp > 20 ? 'Морс' : 'Чай с лимоном'
         }
       };
       if (isWeekend) {
         day.lunch = {
-          salad: getR(['Starter','Vegetarian']),
-          soup: getR(temp < 12 ? ['Beef','Lamb'] : ['Vegetarian','Chicken']),
-          dessert: getR('Dessert'),
-          drink: 'Сок'
+          salad: getBest(['Starter','Vegetarian']),
+          soup: getBest(temp < 15 ? ['Beef','Lamb','Pork'] : ['Vegetarian','Chicken']),
+          dessert: getBest('Dessert'),
+          drink: 'Компот'
         };
       }
       days.push(day);
     }
     db.prepare('INSERT INTO menu_candidates (option_index, gen_date, data) VALUES (?, ?, ?)').run(opt, new Date().toISOString(), JSON.stringify({ days }));
   }
-  res.json({ success: true, message: 'Сгенерировано 4 варианта меню' });
+  res.json({ success: true });
 });
 
 app.get('/api/menu/candidates', (req, res) => {
@@ -236,33 +222,31 @@ app.post('/api/menu/vote', (req, res) => {
   if (!req.session.userId) return res.status(401).json({ error: 'Не авторизован' });
   const { option_index } = req.body;
   db.prepare('INSERT OR REPLACE INTO votes (user_id, option_index, week_id) VALUES (?, ?, 1)').run(req.session.userId, option_index);
-
+  
   const totalVotes = db.prepare('SELECT COUNT(*) as c FROM votes WHERE week_id = 1').get().c;
   const totalUsers = db.prepare('SELECT COUNT(*) as c FROM users').get().c;
-
+  
   if (totalVotes >= totalUsers) {
     const winner = db.prepare('SELECT option_index, COUNT(*) as c FROM votes WHERE week_id = 1 GROUP BY option_index ORDER BY c DESC LIMIT 1').get();
     const winRow = db.prepare('SELECT data FROM menu_candidates WHERE option_index = ?').get(winner.option_index);
     if (winRow) {
       db.prepare('INSERT INTO weekly_menu (start_date, data, status) VALUES (?, ?, ?)').run(new Date().toISOString(), winRow.data, 'approved');
-
       const menu = JSON.parse(winRow.data);
       db.prepare('DELETE FROM shopping_list').run();
       const pantryItems = db.prepare('SELECT product FROM pantry').all().map(p => p.product.toLowerCase().trim());
-
-      const addedProducts = new Set();
+      const added = new Set();
       menu.days.forEach(day => {
         [day.breakfast, day.lunch, day.dinner].filter(Boolean).forEach(meal => {
           Object.values(meal).forEach(recipe => {
-            if (recipe && typeof recipe === 'object' && recipe.ingredients) {
+            if (recipe && recipe.ingredients) {
               try {
                 const ings = JSON.parse(recipe.ingredients);
                 ings.forEach(ing => {
-                  const key = ing.name.toLowerCase().trim();
-                  if (!addedProducts.has(key)) {
-                    addedProducts.add(key);
-                    const inP = pantryItems.includes(key) ? 1 : 0;
-                    db.prepare('INSERT INTO shopping_list (product, quantity, unit, in_pantry) VALUES (?, ?, ?, ?)').run(ing.name, 1, ing.amount || '', inP);
+                  const name = ing.name.trim();
+                  if (!added.has(name.toLowerCase())) {
+                    added.add(name.toLowerCase());
+                    const inP = pantryItems.some(p => name.toLowerCase().includes(p)) ? 1 : 0;
+                    db.prepare('INSERT INTO shopping_list (product, quantity, unit, in_pantry) VALUES (?, ?, ?, ?)').run(name, 1, ing.amount || '', inP);
                   }
                 });
               } catch(e) {}
@@ -283,6 +267,4 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-app.listen(PORT, () => {
-  console.log(`Сервер запущен на порту ${PORT}`);
-});
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));

@@ -1,10 +1,10 @@
 module.exports = {
   apps: [{
-    name: "family-menu",
+    name: "family-menu-dev",
     script: "./server.js",
     env: {
       NODE_ENV: "production",
-      PORT: 3000
+      PORT: 3001
     },
     instances: 1,
     autorestart: true,
