@@ -10,6 +10,7 @@ APP_DIR="/var/www/family-menu"
 cd $APP_DIR
 
 echo "[1/3] Pull latest changes..."
+git clean -fd
 git reset --hard HEAD
 git pull origin main
 
