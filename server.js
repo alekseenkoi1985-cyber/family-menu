@@ -31,6 +31,8 @@ db.exec(`
     instructions TEXT,
     image_url TEXT,
     health_score INTEGER,
+        cooking_time INTEGER DEFAULT 30,
+            calories INTEGER DEFAULT 0,
     rating REAL DEFAULT 5.0
   );
   CREATE TABLE IF NOT EXISTS pantry (
@@ -139,6 +141,29 @@ app.get('/api/recipes/count', (req, res) => {
   const count = db.prepare('SELECT COUNT(*) as count FROM recipes').get();
   res.json(count);
 });
+
+// Получить все рецепты
+app.get('/api/recipes', (req, res) => {
+    const recipes = db.prepare('SELECT * FROM recipes ORDER BY rating DESC').all();
+    res.json(recipes);
+  });
+
+// Получить детальную информацию о рецепте
+app.get('/api/recipes/:id', (req, res) => {
+    const recipe = db.prepare('SELECT * FROM recipes WHERE id = ?').get(req.params.id);
+    if (!recipe) return res.status(404).json({ error: 'Рецепт не найден' });
+    // Парсим JSON поля
+    try {
+          recipe.ingredients = JSON.parse(recipe.ingredients || '[]');
+        } catch(e) { recipe.ingredients = []; }
+    res.json(recipe);
+  });
+
+// Фильтрация рецептов по категории
+app.get('/api/recipes/category/:category', (req, res) => {
+    const recipes = db.prepare('SELECT * FROM recipes WHERE category = ? ORDER BY rating DESC').all(req.params.category);
+    res.json(recipes);
+  });
 
 // Улучшенная генерация меню (Шаг 2)
 app.post('/api/menu/generate', async (req, res) => {
