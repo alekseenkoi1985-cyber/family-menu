@@ -42,7 +42,7 @@ jobs:
             # Клонирование или обновление репозитория
             if [ -d "/root/family-menu" ]; then
               cd /root/family-menu
-                            git clean -fd
+                            git clean -fd || true
                                           git fetch origin
                                                         git reset --hard origin/main
 
