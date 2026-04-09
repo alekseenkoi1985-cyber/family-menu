@@ -288,8 +288,3 @@ app.get('/api/shopping', (req, res) => {
   res.json(db.prepare('SELECT * FROM shopping_list ORDER BY in_pantry, product').all());
 });
 
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
-
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
