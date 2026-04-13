@@ -16,13 +16,11 @@
                 <button onclick="router.go('pantry')" title="Склад">📦</button>
                 <button onclick="router.go('shopping')" title="Покупки">🛒</button>
                 <button onclick="router.go('admin')" id="nav-admin" class="hidden" title="Админ">⚙️</button>
-                <button onclick="api.logout()" title="Выход">🚪</button>
+                <button onclick="auth.logout()" title="Выход">🚪</button>
             </nav>
         </header>
 
-        <main id="content">
-            <!-- Сюда рендерится контент -->
-        </main>
+        <main id="content"></main>
 
         <div id="loader" class="hidden">Загрузка...</div>
         <div id="toast" class="hidden"></div>
@@ -33,17 +31,18 @@
         <div class="page login-page">
             <h2>Кто ты сегодня?</h2>
             <div class="user-grid">
-                <div class="user-card" onclick="ui.showPin('Ирина')">👸 Ирина (Админ)</div>
-                <div class="user-card" onclick="api.login('Илья')">👦 Илья</div>
-                <div class="user-card" onclick="api.login('Ульяна')">👧 Ульяна</div>
-                <div class="user-card" onclick="api.login('Николай')">👨 Николай</div>
+                <div class="user-card" onclick="auth.showPin('Ирина')">👸 Ирина<br><small>Админ</small></div>
+                <div class="user-card" onclick="auth.loginDirect('Илья')">👦 Илья</div>
+                <div class="user-card" onclick="auth.loginDirect('Ульяна')">👧 Ульяна</div>
+                <div class="user-card" onclick="auth.loginDirect('Николай')">👨 Николай</div>
             </div>
             <div id="pin-modal" class="hidden">
                 <div class="modal-content">
                     <h3>Введите PIN для Ирины</h3>
-                    <input type="password" id="pin-input" placeholder="****" inputmode="numeric">
-                    <button onclick="api.login('Ирина', document.getElementById('pin-input').value)">Войти</button>
-                    <button onclick="ui.hidePin()">Отмена</button>
+                    <input type="password" id="pin-input" placeholder="PIN-код" inputmode="numeric"
+                           onkeydown="if(event.key==='Enter') auth.loginWithPin()">
+                    <button onclick="auth.loginWithPin()">Войти</button>
+                    <button onclick="auth.hidePin()" style="background:#999">Отмена</button>
                 </div>
             </div>
         </div>
@@ -52,12 +51,12 @@
     <template id="tpl-pantry">
         <div class="page">
             <h2>📦 Кладовая</h2>
-            <div id="pantry-admin" class="hidden">
+            <div id="admin-pantry-controls" class="hidden">
                 <div class="form-group">
-                    <input type="text" id="p-name" placeholder="Продукт">
-                    <input type="number" id="p-qty" placeholder="Кол-во">
-                    <input type="text" id="p-unit" placeholder="Ед. изм.">
-                    <button onclick="pantry.add()">Добавить</button>
+                    <input type="text" id="p-name" placeholder="Продукт (напр. Морковь)">
+                    <input type="number" id="p-qty" placeholder="Количество" min="0" step="0.1">
+                    <input type="text" id="p-unit" placeholder="Ед. изм. (кг, шт, л)">
+                    <button onclick="pantry.add()">➕ Добавить</button>
                 </div>
             </div>
             <div id="pantry-list" class="list"></div>
@@ -74,8 +73,10 @@
 
     <template id="tpl-menu">
         <div class="page">
-            <h2>📅 Текущее Меню</h2>
-            <div id="active-menu" class="menu-container"></div>
+            <h2>📅 Меню на неделю</h2>
+            <div id="active-menu" class="menu-container">
+                <div class="alert-info">⏳ Загрузка меню...</div>
+            </div>
         </div>
     </template>
 
@@ -89,14 +90,19 @@
     <template id="tpl-admin">
         <div class="page">
             <h2>⚙️ Админ-панель</h2>
+            <div class="stats-row">
+                <div class="stat-card">📚 Рецептов: <b id="stat-recipes">...</b></div>
+                <div class="stat-card">🌡️ Погода: <b id="stat-weather">...</b></div>
+            </div>
             <button class="btn-large" onclick="admin.generateMenu()">🎲 Сгенерировать варианты меню</button>
-            <hr>
-            <h3>Управление рецептами</h3>
-            <div id="admin-recipes-list"></div>
+            <div id="admin-status"></div>
+            <hr style="margin:20px 0">
+            <h3>Управление кладовой</h3>
+            <button onclick="router.go('pantry')" class="btn-secondary">📦 Перейти в кладовую</button>
         </div>
     </template>
 
-        <script src="/js/recipes-ui.js"></script>
+    <script src="/js/recipes-ui.js"></script>
     <script src="/js/app.js"></script>
 </body>
 </html>
